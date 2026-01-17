@@ -21,8 +21,18 @@ import cv2
 from picamera2 import Picamera2
 from PIL import ImageFont, ImageDraw, Image
 
-# --- CONFIGURACION NUEVA ---
-INDICE_MICROFONO = 1	#Importante abir el alsamixer para activar el micro y subir volumen de los cascos
+import paho.mqtt.client as mqtt #pip install paho-mqtt
+
+# Configuracion MQTT
+
+MQTT_BROKER = "broker.hivemq.com"  
+MQTT_PORT = 1883
+MQTT_TOPIC = "proyecto_raspberri_andyjos/voz/frecuencias"
+
+client_mqtt = mqtt.Client()
+
+# Configuracion
+INDICE_MICROFONO = 1    #Importante abir el alsamixer para activar el micro y subir volumen de los cascos
 INPUT_RATE = 44100   # Tasa que le gusta al USB (44.1kHz)
 VOSK_RATE = 16000    # Tasa que necesita Vosk (16kHz)
 
@@ -107,6 +117,22 @@ momento_ultima_palabra = time.time()
 known_speakers = [] 
 speaker_names = []
 
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("[MQTT] Conectado al broker exitosamente.")
+    else:
+        print(f"[MQTT] Fallo al conectar. Codigo: {rc}")
+
+client_mqtt.on_connect = on_connect
+
+# Intentamos conectar (en un try por si el broker no esta listo)
+try:
+    client_mqtt.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client_mqtt.loop_start() # Inicia el hilo en segundo plano para manejar la red
+except Exception as e:
+    print(f"[MQTT Error] No se pudo conectar al inicio: {e}")
+
+
 def dibujar_onda(fragmento_audio):
     """Calcula el volumen y dibuja barras en el Sense HAT"""
     try:
@@ -124,12 +150,11 @@ def dibujar_onda(fragmento_audio):
             fila_real = 7 - fila
             
             if fila < nivel:
-                # Elegir color segun intensidad
+                # Elegir color
                 color = VERDE
                 if fila >= 4: color = AMARILLO
                 if fila >= 6: color = ROJO
                 
-                # Encender toda la fila_real
                 for col in range(8):
                     pixels[fila_real * 8 + col] = color
         
@@ -177,6 +202,7 @@ def actualizar_frecuencias(texto):
         if p:
             frecuencia_palabras[p] = frecuencia_palabras.get(p, 0) + 1
 
+# Función usada para generar el CSV en raspberri, opcional
 def generar_csv():
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     nombre_archivo = f"palabras_frecuencia_{timestamp}.csv"
@@ -188,6 +214,29 @@ def generar_csv():
             writer.writerow([palabra, freq])
 
     print(f"\n[CSV generado] {nombre_archivo}\n")
+    
+
+def enviar_reporte_frecuencias():
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")    
+    datos_ordenados = sorted(frecuencia_palabras.items(), key=lambda x: -x[1])
+    
+    # Diccionario (JSON object) para enviar
+    payload = {
+        "dispositivo": "RaspberryPi_Vosk",
+        "timestamp": timestamp,
+        "datos": datos_ordenados 
+    }
+    mensaje_json = json.dumps(payload)
+
+    # MQTT
+    try:
+        info = client_mqtt.publish(MQTT_TOPIC, mensaje_json)
+        info.wait_for_publish() # Esperar confirmacion de envio
+        print(f"\n[MQTT] Datos enviados a '{MQTT_TOPIC}'")
+    except Exception as e:
+        print(f"\n[MQTT Error] Fallo al publicar: {e}")
+
 
 def narrar_traduccion(texto_original, hablante):
     try:
@@ -210,7 +259,7 @@ def narrar_traduccion(texto_original, hablante):
         
 
 def poner_texto_con_tildes(imagen_cv2, texto, color_texto):
-	img_pil = Image.fromarray(cv2.cvtColor(imagen_cv2, cv2.COLOR_BGR2RGB))
+    img_pil = Image.fromarray(cv2.cvtColor(imagen_cv2, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     ancho_img, alto_img = img_pil.size
     try:
@@ -218,7 +267,7 @@ def poner_texto_con_tildes(imagen_cv2, texto, color_texto):
         # Ruta estandar en Raspberry Pi
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
     except IOError:
-        # Si no la encuentra, carga la por defecto (aunque esa puede ser fea)
+        # Si no la encuentra, carga la por defecto
         font = ImageFont.load_default()
         
         
@@ -230,8 +279,8 @@ def poner_texto_con_tildes(imagen_cv2, texto, color_texto):
     linea_actual = ""
     
     for palabra in palabras:
-		prueba = linea_actual + " " + palabra if linea_actual else palabra
-		try:
+        prueba = linea_actual + " " + palabra if linea_actual else palabra
+        try:
             ancho_prueba = font.getlength(prueba)
         except AttributeError:
             ancho_prueba = font.getsize(prueba)[0]
@@ -239,7 +288,7 @@ def poner_texto_con_tildes(imagen_cv2, texto, color_texto):
         if ancho_prueba <= ancho_maximo:
             linea_actual = prueba
         else:
-			lineas.append(linea_actual)
+            lineas.append(linea_actual)
             linea_actual = palabra
             
     if linea_actual:
@@ -278,7 +327,6 @@ while True:
         dibujar_onda(data)
         
         # 2. CONVERSION IMPORTANTE: De 44100Hz a 16000Hz
-        # Sin esta linea, Vosk no entendera nada
         data, _ = audioop.ratecv(data, 2, 1, INPUT_RATE, VOSK_RATE, None)
 
         if rec.AcceptWaveform(data):
@@ -295,7 +343,6 @@ while True:
                     nombre_hablante = identificar_hablante(spk_vector)
                     if nombre_hablante in speaker_names:
                         idx = speaker_names.index(nombre_hablante)
-                        # Usamos modulo (%) para rotar colores si hay muchos hablantes
                         color_actual_pantalla = PALETA_COLORES[idx % len(PALETA_COLORES)]
                     else:
                         color_actual_pantalla = COLOR_NEUTRO
@@ -344,8 +391,9 @@ while True:
             break
         
 
-        if time.time() - tiempo_inicio >= 60:
-            generar_csv()
+        if time.time() - tiempo_inicio >= 180:
+            enviar_reporte_frecuencias()
+            #generar_csv()
             frecuencia_palabras.clear()
             tiempo_inicio = time.time()
 
