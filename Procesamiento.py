@@ -74,7 +74,6 @@ def reconstruir_lista_palabras(datos_frecuencia):
     """
     lista_completa = []
     for palabra, cantidad in datos_frecuencia:
-        # Añadimos la palabra tantas veces como se dijo
         lista_completa.extend([palabra] * int(cantidad))
     return lista_completa
 
@@ -84,12 +83,10 @@ def guardar_metricas_csv(timestamp, resultados):
     with open(ARCHIVO_METRICAS, mode='a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         
-        # Si es archivo nuevo, escribimos cabeceras
         if not existe:
             headers = ['Timestamp'] + list(resultados.keys())
             writer.writerow(headers)
         
-        # Escribimos los datos
         fila = [timestamp] + list(resultados.values())
         writer.writerow(fila)
         

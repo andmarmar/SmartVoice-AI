@@ -51,7 +51,6 @@ PALETA_COLORES = [
 ]
 COLOR_NEUTRO = (255, 255, 255)
 
-# HILOS 
 
 # Colas para comunicación entre hilos
 cola_audio_raw = queue.Queue()    # Del Micro -> Al Procesador IA
@@ -106,7 +105,6 @@ def get_distance(vec1, vec2):
     return 1 - (dot_product / (norm_a * norm_b))
 
 def identificar_hablante(vector_voz):
-    """Devuelve el nombre del hablante y su índice de color"""
     umbral = 0.85
     best_dist = 100
     speaker_idx = -1
@@ -126,7 +124,6 @@ def identificar_hablante(vector_voz):
         return new_name, len(speaker_names) - 1
 
 def dibujar_onda_sensehat(fragmento_audio):
-    """Visualización reactiva en LEDS"""
     try:
         rms = audioop.rms(fragmento_audio, 2)
         nivel = min(8, int((rms / SENSIBILIDAD) * 8))
@@ -144,7 +141,6 @@ def dibujar_onda_sensehat(fragmento_audio):
         pass
 
 def poner_texto_pil(imagen_cv2, texto, color_texto):
-    """Dibuja texto con tildes usando Pillow (Optimizado)"""
     img_pil = Image.fromarray(cv2.cvtColor(imagen_cv2, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     ancho_img, alto_img = img_pil.size
@@ -154,7 +150,6 @@ def poner_texto_pil(imagen_cv2, texto, color_texto):
     except:
         font = ImageFont.load_default()
 
-    # Lógica de word-wrapping
     palabras = texto.split()
     lineas = []
     linea_actual = ""
@@ -174,7 +169,6 @@ def poner_texto_pil(imagen_cv2, texto, color_texto):
             linea_actual = p
     if linea_actual: lineas.append(linea_actual)
 
-    # Dibujar líneas
     alto_linea = 35
     y_inicio = alto_img - 40 - (len(lineas) * alto_linea)
     
@@ -185,14 +179,12 @@ def poner_texto_pil(imagen_cv2, texto, color_texto):
         x = (ancho_img - ancho_linea) // 2
         y = y_inicio + (i * alto_linea)
         
-        # Borde negro para legibilidad
         for dx, dy in [(-2,-2), (-2,2), (2,-2), (2,2)]:
             draw.text((x+dx, y+dy), linea, font=font, fill=(0,0,0))
         draw.text((x, y), linea, font=font, fill=color_texto)
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
-# HILOS
 
 # HILO 1: CAPTURA DE AUDIO
 def hilo_captura_audio():
@@ -239,7 +231,6 @@ def hilo_procesamiento_ia():
             else:
                 data_vosk = data_raw
 
-            # Pasar a VOSK
             if rec.AcceptWaveform(data_vosk):
                 res = json.loads(rec.Result())
                 texto = res.get("text", "").strip()
@@ -255,13 +246,10 @@ def hilo_procesamiento_ia():
                     
                     print(f"[{nombre}]: {texto}")
                     
-                    # Actualizar Video
                     estado_sistema.actualizar(f"{nombre}: {texto}", nombre, color)
                     
-                    # Enviar a Traducción (TTS)
                     cola_tts.put((texto, nombre))
                     
-                    # Enviar a Datos (MQTT/CSV)
                     cola_datos.put(texto)
                     
             else:
@@ -295,7 +283,7 @@ def hilo_traductor_tts():
             filename = f"temp_{threading.get_ident()}_{int(time.time())}.mp3"
             tts.save(filename)
             
-            # Reproducir 
+            # 3. Reproducir 
             os.system(f"mpg123 -q {filename}")
             
             # 4. Limpieza
@@ -326,7 +314,6 @@ def hilo_datos_mqtt():
     
     while not evento_parada.is_set():
         try:
-            # Recolectar palabras
             try:
                 texto = cola_datos.get(timeout=1)
                 palabras = texto.lower().split()
@@ -336,7 +323,6 @@ def hilo_datos_mqtt():
             except queue.Empty:
                 pass
             
-            # Chequear tiempo (cada 180 segundos)
             ahora = time.time()
             if ahora - ultimo_reporte >= 180:
                 if frecuencias:
@@ -368,7 +354,6 @@ def hilo_datos_mqtt():
 # MAIN
 
 if __name__ == "__main__":
-    # 1. Configuracion Camara
     picam2 = Picamera2()
     config = picam2.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
     picam2.configure(config)
@@ -390,7 +375,7 @@ if __name__ == "__main__":
         
     print("\n>>> SISTEMA FUNCIONANDO EN PARALELO. Presiona 'q' para salir.\n")
 
-    # Bucle Principal (Solo Video UI)
+    # Bucle Principal
     try:
         while True:
             # Captura frame
